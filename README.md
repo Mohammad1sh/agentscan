@@ -1,5 +1,9 @@
 # agentscan
 
+[![CI](https://github.com/Mohammad1sh/agentscan/actions/workflows/ci.yml/badge.svg)](https://github.com/Mohammad1sh/agentscan/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![runtime dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)
+
 **Security & quality scanner for AI agent extensions.** Point it at a Claude
 skill, an MCP server config, a Cursor rules folder, or an `AGENTS.md` file and it
 tells you — in one command — whether that extension is trying to do something it
