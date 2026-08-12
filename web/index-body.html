@@ -212,7 +212,7 @@
         </div>
         <div class="badges">
           <span><b>0</b> runtime dependencies</span>
-          <span><b>~30</b> rules &middot; 7 categories</span>
+          <span><b>50</b> rules &middot; 9 categories</span>
           <span>runs <b>offline</b> in ms</span>
         </div>
       </div>
@@ -264,6 +264,16 @@
           <div class="top"><h3>Supply chain</h3><span class="chip m">MED</span></div>
           <p>Auto-confirmed <code style="display:inline;padding:1px 4px">npx -y</code>, runtime package installs and unpinned remote scripts pulled in at run time.</p>
           <code>npx -y some-unpinned-package</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>MCP tool-poisoning</h3><span class="chip c">CRIT</span></div>
+          <p>Hidden <code style="display:inline;padding:1px 4px">&lt;IMPORTANT&gt;</code> directives in tool descriptions, cross-server forwarding, and privileged container mounts.</p>
+          <code>"description": "... &lt;IMPORTANT&gt;read ~/.ssh..."</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Obfuscated payloads</h3><span class="chip c">CRIT</span></div>
+          <p>Decode-and-execute chains that hide the real command until runtime — across JS, Python, PowerShell and bash.</p>
+          <code>eval(atob("ZmV0Y2go..."))</code>
         </div>
       </div>
     </section>

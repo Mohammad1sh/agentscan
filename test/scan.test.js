@@ -61,6 +61,22 @@ test('redaction masks the middle of a secret', () => {
   assert.ok(!masked.includes('IOSFODNN7'), 'the middle of the secret should be hidden');
 });
 
+test('flags MCP tool-poisoning and misconfiguration', () => {
+  const result = scan(join(fixtures, 'malicious-mcp'));
+  const ids = new Set(result.findings.map((f) => f.ruleId));
+  for (const id of ['MCP001', 'MCP008', 'MCP009', 'MCP011']) {
+    assert.ok(ids.has(id), `expected rule ${id} to fire; got: ${[...ids].join(', ')}`);
+  }
+});
+
+test('flags Windows/PowerShell obfuscation and defense-evasion', () => {
+  const result = scan(join(fixtures, 'malicious-ps'));
+  const ids = new Set(result.findings.map((f) => f.ruleId));
+  for (const id of ['OBF006', 'WIN001', 'WIN002']) {
+    assert.ok(ids.has(id), `expected rule ${id} to fire; got: ${[...ids].join(', ')}`);
+  }
+});
+
 test('inline agentscan-ignore suppresses only the named rule', () => {
   const result = scan(join(fixtures, 'suppression'));
   const ids = new Set(result.findings.map((f) => f.ruleId));

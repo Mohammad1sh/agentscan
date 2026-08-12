@@ -105,7 +105,10 @@ agentscan ./path/to/skill
 | **Data exfiltration** | credential-read + network-send combos, `~/.ssh` & cloud-cred access, known exfil endpoints | critical–high |
 | **Hardcoded secrets** | AWS keys, private keys, OpenAI/Anthropic/GitHub/Slack/Stripe/Google tokens | critical–high |
 | **Over-broad permissions** | wildcard tool grants, `--dangerously-skip-permissions`, auto-approve/YOLO flags | high–medium |
-| **Supply chain** | auto-confirmed `npx -y`, runtime `pip/npm install`, unpinned remote script fetches | medium–low |
+| **MCP tool-poisoning** | hidden `<IMPORTANT>` directives in tool descriptions, cross-server forwarding, privileged containers, exec tools on auto-approve | critical–high |
+| **Obfuscated payloads** | `eval(atob())`, `exec(b64decode())`, `marshal.loads`, PowerShell `-EncodedCommand`, base64-piped-to-shell | critical |
+| **Windows / PowerShell** | download-and-execute cradles, Defender disabling, Run-key persistence, shadow-copy deletion | critical–high |
+| **Supply chain** | auto-confirmed `npx -y`, runtime installs, unpinned fetches, malicious `postinstall` hooks | medium–high |
 | **Hygiene** | missing frontmatter/description, oversized skills | low–info |
 
 Findings are redacted where sensitive (secrets are masked in output).
@@ -157,7 +160,7 @@ not a guarantee.
 
 ## Roadmap
 
-- More rules (obfuscation/entropy, MCP tool-poisoning, cross-file taint).
+- More rules (entropy heuristics, cross-file taint, homoglyph detection).
 - Config file + inline `# agentscan-ignore` suppressions.
 - SARIF output and a first-class GitHub Action.
 - A hosted CI dashboard and org-wide policy enforcement (planned Pro tier).

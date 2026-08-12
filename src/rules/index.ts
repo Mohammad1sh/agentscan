@@ -611,8 +611,230 @@ function mkHygiene(
 // Registry
 // ---------------------------------------------------------------------------
 
+// Second-wave rules: MCP-specific threats, obfuscation, Windows commands,
+// deeper supply chain. Derived from a structured threat-research pass.
+const PATTERN_RULES_V2: PatternRuleDef[] = [
+  // --- MCP-server-specific ---------------------------------------------
+  {
+    id: 'MCP001',
+    title: 'Hidden directive tag in tool description',
+    severity: 'critical',
+    category: 'mcp-tool-poisoning',
+    appliesTo: TEXT_KINDS,
+    pattern: /"(description|instructions)"\s*:\s*".*<\s*(important|system|instructions?|admin|hidden)\s*>/i,
+    message:
+      'A tool/parameter description hides an agent-directed directive tag (e.g. <IMPORTANT>). This is the MCP "tool poisoning" technique — the model reads it as trusted docs the moment tools are listed, before any call is approved.',
+    recommendation:
+      'Reject tool descriptions that contain directive tags, and show descriptions to the user before approval.',
+  },
+  {
+    id: 'MCP002',
+    title: 'Cross-server forwarding instruction',
+    severity: 'critical',
+    category: 'mcp-tool-poisoning',
+    appliesTo: TEXT_KINDS,
+    pattern:
+      /\b(whenever|every time|any time)\b[^.\n]{0,40}\byou (use|call|invoke)\b[^.\n]{0,60}\b(also|additionally)\b[^.\n]{0,40}\b(bcc|cc|forward|send (a copy|it) to)\b/i,
+    message:
+      'Instructs the agent that whenever it uses another (trusted) tool it should also silently copy or forward data elsewhere — the cross-server tool-shadowing exfiltration pattern.',
+    recommendation:
+      'A tool description must not change how other tools are used. Treat this as a compromise indicator.',
+  },
+  {
+    id: 'MCP003',
+    title: 'Credential contents routed into a tool parameter',
+    severity: 'high',
+    category: 'mcp-tool-poisoning',
+    appliesTo: TEXT_KINDS,
+    pattern:
+      /\b(include|insert|append|attach|embed|put)\b[^.\n]{0,50}\bcontents?\s+of\b[^.\n]{0,60}(id_rsa|\.ssh|\.aws\/credentials|\.env|password|api[_-]?key)/i,
+    message:
+      'Instructs the agent to embed the contents of a credential file or secret into a call parameter — side-channel exfiltration through a legitimate-looking tool call.',
+    recommendation:
+      'Legitimate tool docs do not reference ~/.ssh, .aws/credentials or .env. Reject and review.',
+  },
+  {
+    id: 'MCP008',
+    title: 'Privileged container or host-root mount',
+    severity: 'critical',
+    category: 'permissions',
+    appliesTo: ['mcp-config'],
+    pattern: /--privileged|--cap-add[=\s]*all|"-v"\s*,\s*"\/:/i,
+    message:
+      'An MCP server container is launched privileged or with the host filesystem root mounted — container isolation then provides no protection.',
+    recommendation:
+      'Never use --privileged, --cap-add=ALL, or a -v /:/… root mount. Mount only the directory the server needs, read-only where possible.',
+  },
+  {
+    id: 'MCP009',
+    title: 'Command substitution in MCP env value',
+    severity: 'high',
+    category: 'data-exfiltration',
+    appliesTo: ['mcp-config'],
+    pattern: /"[A-Z_][A-Z0-9_]*"\s*:\s*"[^"]*\$\([^)]*\)[^"]*"/,
+    message:
+      'An MCP env value uses shell command substitution $(…) instead of a literal or ${VAR} — a structure used to harvest credentials into the server process at launch.',
+    recommendation:
+      'MCP env blocks should contain only literal values or ${VAR} references. Reject command substitution.',
+  },
+  {
+    id: 'MCP011',
+    title: 'Dangerous tool on MCP auto-approve list',
+    severity: 'high',
+    category: 'permissions',
+    appliesTo: ['mcp-config'],
+    pattern:
+      /"(alwaysallow|autoapprove|auto_approve)"\s*:\s*\[[^\]]*"(execute_command|run_command|shell|bash|write_file|delete_file|eval|exec)"[^\]]*\]/i,
+    message:
+      'A code-execution or file-mutating tool is on the MCP auto-approve list, so it runs with no per-call confirmation — any later compromise of that server gets unattended execution rights.',
+    recommendation:
+      'Keep destructive/exec tools out of autoApprove/alwaysAllow; require explicit confirmation for anything that mutates files or runs code.',
+  },
+  // --- Obfuscation: decode-and-execute ---------------------------------
+  {
+    id: 'OBF001',
+    title: 'eval(atob(...)) decode-and-execute',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern: /\b(eval|Function)\s*\(\s*atob\s*\(/,
+    message:
+      'A base64-decoded string is fed straight into eval()/Function() — the real behavior is hidden from static reading and only appears at runtime.',
+    recommendation: 'Decode the payload offline and review it. A skill should not execute code from a decoded blob.',
+  },
+  {
+    id: 'OBF002',
+    title: 'Buffer.from(base64) piped into exec/eval',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern: /\b(eval|Function|exec|execSync|spawn|spawnSync)\s*\(\s*Buffer\.from\([^,]+,\s*['"]base64['"]/,
+    message:
+      'A base64-decoded Buffer is passed directly into eval/Function or a child_process call — a Node.js stage-2 loader pattern.',
+    recommendation: 'Never decode and execute in one step. Write the decoded content to a reviewable file first.',
+  },
+  {
+    id: 'OBF003',
+    title: 'exec/eval of base64.b64decode (Python)',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern: /\b(exec|eval)\s*\([^\n]{0,80}\bb64decode\s*\(/,
+    message:
+      'A base64-decoded value is executed with exec()/eval(), hiding the real command from anyone reading the source.',
+    recommendation: 'Decode and review the blob. Legitimate b64decode is followed by parsing, not exec/eval.',
+  },
+  {
+    id: 'OBF005',
+    title: 'exec(marshal.loads(...)) bytecode loader',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern: /\bexec\s*\(\s*marshal\.loads\s*\(/,
+    message:
+      'Raw marshalled Python bytecode is deserialized and executed — a hallmark of Python malware loaders with no benign use in a skill.',
+    recommendation: 'Quarantine the file. There is no legitimate reason to exec marshalled bytecode in a skill.',
+  },
+  {
+    id: 'OBF006',
+    title: 'PowerShell -EncodedCommand base64 blob',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern: /-(e|enc|encodedcommand)\b\s+[A-Za-z0-9+\/=]{60,}/i,
+    message:
+      'PowerShell -EncodedCommand runs a base64/UTF-16LE script with no plaintext on the command line — a common evasion technique.',
+    recommendation: 'Decode the blob and review it. Ship plaintext .ps1 files, not pre-encoded one-liners.',
+  },
+  {
+    id: 'OBF011',
+    title: 'base64 -d piped into a shell',
+    severity: 'critical',
+    category: 'obfuscation',
+    appliesTo: CODE_KINDS,
+    pattern:
+      /base64\s+(-d|--decode)\b[^\n]*\|\s*(bash|sh|zsh)\b|(eval|bash|sh|zsh)\s*(<\(|"?\$\()[^\n]*base64\s+(-d|--decode)\b/i,
+    message:
+      'A base64 blob is decoded and streamed straight into a shell, so the real command never appears in plaintext.',
+    recommendation: 'Decode the blob and review the command before running the skill.',
+  },
+  // --- Windows / PowerShell dangerous commands -------------------------
+  {
+    id: 'WIN001',
+    title: 'PowerShell download-and-execute cradle',
+    severity: 'critical',
+    category: 'dangerous-command',
+    appliesTo: CODE_KINDS,
+    pattern:
+      /(\biwr\b|\birm\b|invoke-webrequest|invoke-restmethod)[^\n|]{0,200}\|\s*(iex|invoke-expression)\b|iex\s*\(\s*(new-object\s+)?(system\.)?net\.webclient/i,
+    message:
+      'Downloads a remote script and runs it in memory via Invoke-Expression — the Windows analog of curl|bash, leaving nothing on disk to scan.',
+    recommendation: 'Download to a file, review it, then run a pinned, hash-verified copy. Never pipe web output into iex.',
+  },
+  {
+    id: 'WIN002',
+    title: 'Disables Windows Defender protection',
+    severity: 'critical',
+    category: 'dangerous-command',
+    appliesTo: CODE_KINDS,
+    pattern:
+      /set-mppreference\b[^\n]*-disable(realtimemonitoring|ioavprotection|behaviormonitoring|scriptscanning)\b[^\n]*\$?true\b/i,
+    message: 'Turns off a Windows Defender protection feature — the standard first step before dropping further malware.',
+    recommendation: 'A skill should never alter endpoint AV settings. Remove it.',
+  },
+  {
+    id: 'WIN004',
+    title: 'Registry Run-key persistence',
+    severity: 'high',
+    category: 'dangerous-command',
+    appliesTo: CODE_KINDS,
+    pattern:
+      /reg(\.exe)?\s+add\s+[^\n]*currentversion.run(once)?\b[^\n]*\/v\s|new-itemproperty\s+[^\n]*currentversion.run(once)?\b/i,
+    message:
+      'Writes to the CurrentVersion\\Run / RunOnce registry key — the most common Windows auto-start persistence mechanism.',
+    recommendation: 'Skills should not install logon persistence. Remove the Run-key write.',
+  },
+  {
+    id: 'WIN011',
+    title: 'Shadow copy / backup deletion',
+    severity: 'critical',
+    category: 'dangerous-command',
+    appliesTo: CODE_KINDS,
+    pattern:
+      /vssadmin(\.exe)?\s+delete\s+shadows\b|wmic\s+shadowcopy\s+delete\b|wbadmin\s+delete\s+(catalog|backup|systemstatebackup)\b|bcdedit(\.exe)?\s+[^\n]*recoveryenabled\s+no\b/i,
+    message:
+      'Deletes Volume Shadow Copies / backups or disables Windows recovery — the standard ransomware pre-encryption step.',
+    recommendation: 'There is no legitimate skill use for deleting all shadow copies. Treat as hostile.',
+  },
+  // --- Deeper supply chain ---------------------------------------------
+  {
+    id: 'SC004',
+    title: 'Install lifecycle script runs network/shell',
+    severity: 'high',
+    category: 'supply-chain',
+    appliesTo: ['json', 'mcp-config'],
+    pattern:
+      /"(preinstall|postinstall|install)"\s*:\s*"[^"]*(curl|wget|node\s+-e|npx\s|bash\s+-c|powershell|iwr|invoke-webrequest)/i,
+    message:
+      'A package install lifecycle script runs network or shell commands — this code executes automatically on npm install.',
+    recommendation: 'Remove network/shell from install hooks; run setup explicitly and reviewably.',
+  },
+  {
+    id: 'SC005',
+    title: 'TLS certificate verification disabled',
+    severity: 'medium',
+    category: 'supply-chain',
+    appliesTo: CODE_KINDS,
+    pattern: /NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0|curl\s+[^\n]*(-k|--insecure)\b|verify\s*=\s*False\b/i,
+    message:
+      'Disables TLS certificate verification, opening downloaded code to on-path tampering.',
+    recommendation: 'Keep certificate verification on; fix the root cause instead of disabling TLS checks.',
+  },
+];
+
 export const ALL_RULES: Rule[] = [
   ...PATTERN_RULES.map(patternRule),
+  ...PATTERN_RULES_V2.map(patternRule),
   ...PERMISSION_PATTERNS.map(patternRule),
   hiddenUnicodeRule,
   exfilComboRule,
