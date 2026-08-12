@@ -56,7 +56,10 @@ export function renderHuman(summary: ScanSummary, opts: ReportOptions): string {
   if (summary.findings.length === 0) {
     out.push(s(ANSI.green, '  ✓ No issues found. Nothing suspicious in the scanned extensions.'));
     out.push('');
-    if (opts.byPackage) out.push(packagesSection(summary, s));
+    if (opts.byPackage) {
+      out.push(packagesSection(summary, s));
+      out.push('');
+    }
     out.push(scorecard(summary, opts, s));
     return out.join('\n');
   }
@@ -73,7 +76,10 @@ export function renderHuman(summary: ScanSummary, opts: ReportOptions): string {
     out.push('');
   }
 
-  if (opts.byPackage) out.push(packagesSection(summary, s));
+  if (opts.byPackage) {
+    out.push(packagesSection(summary, s));
+    out.push('');
+  }
   out.push(scorecard(summary, opts, s));
   return out.join('\n');
 }
@@ -157,7 +163,10 @@ function plainTallies(p: PackageScore): string {
     const n = p.counts[sev];
     if (n > 0) parts.push(`${short[sev]} ${n}`);
   }
-  return parts.length > 0 ? parts.join(' ') : '—';
+  if (parts.length > 0) return parts.join(' ');
+  // Only info-severity findings (or none): surface info explicitly rather than
+  // rendering identically to a truly clean package.
+  return p.counts.info > 0 ? `info ${p.counts.info}` : '—';
 }
 
 function worstColor(p: PackageScore): string {
@@ -171,8 +180,8 @@ function packageRow(p: PackageScore, s: Style): string {
   const grade = s(ANSI.bold, s(gradeColorOf(p.grade), fit(p.grade, 2)));
   const score = s(ANSI.gray, `${String(p.score).padStart(3)}/100`);
   const label = s(ANSI.bold, fit(p.label, 18));
-  const kind = s(ANSI.gray, fit(`(${p.kind})`, 16));
-  const tallies = s(worstColor(p), fit(plainTallies(p), 20));
+  const kind = s(ANSI.gray, fit(`(${p.kind})`, 18));
+  const tallies = s(worstColor(p), plainTallies(p).padEnd(20));
   const files = s(ANSI.gray, `${String(p.filesScanned).padStart(4)} file(s)`);
   const id = s(ANSI.cyan, p.id);
   return `${grade} ${score}  ${label} ${kind} ${tallies} ${files}  ${id}`;

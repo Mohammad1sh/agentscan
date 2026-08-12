@@ -6,7 +6,7 @@ import { renderHuman, renderJson } from './report.js';
 import type { Severity } from './types.js';
 import { SEVERITY_ORDER, severityAtLeast } from './types.js';
 
-const VERSION = '0.1.5';
+const VERSION = '0.1.6';
 
 interface Cli {
   path: string;

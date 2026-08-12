@@ -328,11 +328,13 @@ export function packageRootOf(
   };
 
   // R1 — deepest live SKILL.md dir that is an ancestor-or-equal of the file.
+  // AUTHORITATIVE: a file inside a skill belongs to that skill, so return
+  // immediately. A nested skills/<name>, plugins/*, or plugin_<id> subfolder
+  // that lacks its own SKILL.md must NOT carve files out of the enclosing
+  // skill (that would hide the skill's own risk from the unit a user vets).
   for (let len = n; len >= 1; len--) {
     if (skillRoots.has(dir.slice(0, len).join('/'))) {
-      k = len;
-      kind = 'skill';
-      break;
+      return { root: dir.slice(0, len).join('/'), kind: 'skill' };
     }
   }
   // R2 — deepest 'skills/<name>' collection.
@@ -389,6 +391,17 @@ function labelFor(root: string, scanRootBase: string): string {
   return last;
 }
 
+/**
+ * Name for the scan-root bucket. When the scan target is a single file, use
+ * its parent directory's name (the skill's dir), not the file name, so
+ * `agentscan path/to/SKILL.md` labels the package by the skill it belongs to.
+ */
+function scanRootBaseFor(root: string): string {
+  const st = safeStat(root);
+  const base = st?.isFile() ? dirname(resolve(root)) : resolve(root);
+  return basename(base) || 'root';
+}
+
 function cmpPackages(a: PackageScore, b: PackageScore): number {
   if (a.score !== b.score) return a.score - b.score; // worst (lowest) first
   for (const sev of SEVERITY_ORDER) {
@@ -406,7 +419,7 @@ export function computePackages(
   const skillRoots = new Set<string>(
     targets.filter((t) => t.kind === 'skill').map((t) => parentDir(t.relPath)),
   );
-  const scanRootBase = basename(resolve(root)) || 'root';
+  const scanRootBase = scanRootBaseFor(root);
 
   interface Acc {
     id: string;

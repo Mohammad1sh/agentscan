@@ -178,3 +178,27 @@ test('computePackages: multi-package partition, labels, and worst-first order', 
   // per-package score matches the shared scoring formula
   for (const p of pkgs) assert.equal(p.score, computeScore(p.counts));
 });
+
+test('packageRootOf: a nested collection/plugin inside a skill stays in the skill', () => {
+  const skillRoots = new Set(['bundle']);
+  // a skills/<name> subfolder inside the skill, with no inner SKILL.md, must
+  // NOT carve its files out of the enclosing skill.
+  assert.deepEqual(packageRootOf('bundle/skills/examples/run.sh', skillRoots), {
+    root: 'bundle',
+    kind: 'skill',
+  });
+  // a plugin_<id> subfolder inside the skill likewise stays put.
+  assert.deepEqual(packageRootOf('bundle/plugin_x/y.md', skillRoots), {
+    root: 'bundle',
+    kind: 'skill',
+  });
+  // deepest-skill-wins still holds when a real inner SKILL.md exists.
+  const nested = new Set(['bundle', 'bundle/inner']);
+  assert.equal(packageRootOf('bundle/inner/z.md', nested).root, 'bundle/inner');
+});
+
+test('per-package grading: a single-file scan labels by the skill directory', () => {
+  const result = scan(join(fixtures, 'malicious-skill', 'SKILL.md'));
+  assert.equal(result.packages.length, 1);
+  assert.equal(result.packages[0].label, 'malicious-skill');
+});
