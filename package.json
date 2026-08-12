@@ -1,6 +1,9 @@
 {
-  "name": "agentscan",
+  "name": "@meedo01/agentscan",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Security & quality scanner for AI agent extensions — Claude skills, MCP servers, Cursor rules and agent instruction files. Like npm audit, but for the stuff you install into your coding agent.",
   "type": "module",
   "bin": {
