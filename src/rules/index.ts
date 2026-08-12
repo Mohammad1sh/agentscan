@@ -533,12 +533,13 @@ const hiddenUnicodeRule: Rule = {
   },
 };
 
-// A genuine exfiltration payload reads a *sensitive* secret and sends it over
-// the network *near* the read. Requiring a specific secret (not bare .env /
-// process.env, which every app touches) plus line proximity avoids flagging a
-// README that mentions `.env` in one place and `curl` far away in another.
+// A genuine exfiltration payload reads a local *credential file* (SSH key,
+// cloud creds, .env, keychain) and sends it over the network nearby. This is
+// deliberately NOT "any $API_TOKEN / process.env": passing an API token in an
+// Authorization header to the API it belongs to is normal auth, not exfil, and
+// matching it flagged every documented `curl -H "Authorization: Bearer $TOKEN"`.
 const SECRET_READ =
-  /(id_rsa\b|id_ed25519\b|~?\/?\.ssh\/|\.aws\/credentials|\.config\/gcloud|\.git-credentials|\.netrc\b|\.npmrc\b|find-generic-password|\b[A-Z][A-Z0-9_]*(_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD)\b|process\.env\.[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)|os\.environ(\.get\(|\[)['"][^'"]*(KEY|TOKEN|SECRET|PASSWORD))/;
+  /(id_rsa\b|id_ed25519\b|id_ecdsa\b|~\/\.ssh\/|\/\.ssh\/id_|\.aws\/credentials|\.config\/gcloud|\.kube\/config|\.docker\/config\.json|\.git-credentials|\.netrc\b|\.npmrc\b|find-generic-password|\bcat\s+[^\n|]*\.env\b)/i;
 const NETWORK_SEND =
   /\b(curl|wget|fetch\s*\(|axios|requests\.(get|post|put)|urllib|http\.request|Invoke-WebRequest|Invoke-RestMethod|nc\s|ncat\s|\/dev\/tcp\/)/i;
 const EXFIL_WINDOW = 4; // secret read and network send must be within N lines
