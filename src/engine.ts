@@ -67,11 +67,14 @@ export function classify(relPath: string): FileKind | null {
   const ext = extname(name);
   const normalized = relPath.replace(/\\/g, '/').toLowerCase();
 
-  if (name === 'skill.md') return 'skill';
-  // Only the SKILL.md manifest is a "skill". Other .md files under a skills/
-  // tree (README, CHANGELOG, references, translations, bundled web content) are
-  // documentation — classified as 'markdown' so danger rules there inform
-  // rather than fail an otherwise-legitimate plugin.
+  // The live SKILL.md manifest is a "skill". A SKILL.md that lives under a
+  // /docs/ tree is a translated or example mirror of the real skill (which sits
+  // at the package root) — treat it as documentation, not a second live skill,
+  // so localized copies don't multiply the same finding across every language.
+  if (name === 'skill.md' && !/(^|\/)docs\//.test(normalized)) return 'skill';
+  // Other .md files under a skills/ tree (README, CHANGELOG, references,
+  // translations, bundled web content) are documentation — classified as
+  // 'markdown' so danger rules there inform rather than fail a legit plugin.
   if (MCP_CONFIG_FILES.has(name)) return 'mcp-config';
   if (AGENT_RULE_FILES.has(name)) return 'agent-rules';
   if (normalized.includes('/.cursor/rules/') && (ext === '.mdc' || ext === '.md')) return 'agent-rules';

@@ -66,13 +66,30 @@ function minSeverity(a: Severity, b: Severity): Severity {
   return SEVERITY_ORDER.indexOf(a) >= SEVERITY_ORDER.indexOf(b) ? a : b;
 }
 
-function severityForProse(
+/** A test, spec, or fixture file — dangerous patterns here are fixtures, not
+ *  live instructions the agent runs. Keyed on the path relative to the scan
+ *  root, so a fixture scanned directly as the target is unaffected. */
+function isTestContext(relPath: string): boolean {
+  const p = relPath.toLowerCase();
+  return (
+    /(^|\/)(tests?|__tests__|__mocks__|specs?|fixtures?|e2e)\//.test(p) ||
+    /\.(test|spec)\.[a-z0-9]+$/.test(p)
+  );
+}
+
+// Documentation prose and test/fixture code are both contexts where a dangerous
+// pattern is an example or a fixture, not a live instruction. In either, the
+// demotable categories drop to 'info' (or a rule's proseMax cap) so they inform
+// without failing an otherwise-legitimate package. SKILL.md, real scripts, and
+// configs outside a test tree keep full severity.
+function effectiveSeverity(
   base: Severity,
   category: string,
-  kind: FileKind,
+  target: ScanTarget,
   proseMax?: Severity,
 ): Severity {
-  if (kind !== 'markdown') return base;
+  const demote = target.kind === 'markdown' || isTestContext(target.relPath);
+  if (!demote) return base;
   if (proseMax) return minSeverity(base, proseMax);
   if (PROSE_DEMOTED_CATEGORIES.has(category)) return 'info';
   return base;
@@ -121,7 +138,7 @@ function patternRule(def: PatternRuleDef): Rule {
         findings.push({
           ruleId: def.id,
           title: def.title,
-          severity: severityForProse(def.severity, def.category, target.kind, def.proseMaxSeverity),
+          severity: effectiveSeverity(def.severity, def.category, target, def.proseMaxSeverity),
           category: def.category,
           file: target.relPath,
           line: m.line,
