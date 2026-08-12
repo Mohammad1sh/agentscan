@@ -138,9 +138,16 @@ jobs:
 
 ## Options
 
+By default agentscan scans only agent extensions and the files a skill ships
+(SKILL.md and its directory, MCP configs, Cursor rules, CLAUDE.md / AGENTS.md,
+and scripts under a `skills` / `.claude` / `.cursor` tree) — point it at a whole
+project or your home directory and it will **not** flag your libraries. Pass
+`--all` to scan every file instead.
+
 ```
 agentscan [path] [options]
 
+  --all                   Scan every file, not just agent extensions
   --json                  Machine-readable JSON output
   --fail-on <severity>    Exit non-zero at/above this level
                           (critical|high|medium|low|none, default: high)

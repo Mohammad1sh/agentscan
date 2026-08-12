@@ -560,6 +560,7 @@ const hygieneRule: Rule = {
   category: 'hygiene',
   appliesTo: ['skill'],
   check(target: ScanTarget): Finding[] {
+    if (target.kind !== 'skill') return [];
     const findings: Finding[] = [];
     const name = basename(target.relPath).toLowerCase();
     const isSkillManifest = name === 'skill.md';

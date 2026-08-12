@@ -1,7 +1,7 @@
 // Discovery + scan orchestration + scoring.
 
 import { readFileSync, statSync, readdirSync, type Stats } from 'node:fs';
-import { join, relative, extname, basename } from 'node:path';
+import { join, relative, extname, basename, dirname } from 'node:path';
 import type { ScanTarget, Finding, ScanSummary, Severity, FileKind } from './types.js';
 import { SEVERITY_ORDER, SEVERITY_WEIGHT } from './types.js';
 import { ALL_RULES } from './rules/index.js';
@@ -22,6 +22,12 @@ const IGNORED_DIRS = new Set([
   '.cache',
   '.idea',
   '.vscode',
+  'site-packages',
+  'PackageCache',
+  '.gradle',
+  '.nuget',
+  '.cargo',
+  '.tox',
 ]);
 
 const SCRIPT_EXT = new Set([
@@ -50,6 +56,9 @@ const AGENT_RULE_FILES = new Set([
 
 const MCP_CONFIG_FILES = new Set(['.mcp.json', 'mcp.json', 'claude_desktop_config.json']);
 
+// File kinds that are always in scope: these files ARE agent extensions.
+const AGENT_EXTENSION_KINDS: FileKind[] = ['skill', 'mcp-config', 'agent-rules'];
+
 const MAX_FILE_BYTES = 2 * 1024 * 1024; // skip files larger than 2MB
 const NULL_BYTE = String.fromCharCode(0);
 
@@ -70,16 +79,32 @@ export function classify(relPath: string): FileKind | null {
   return null; // not a file we care about
 }
 
-export function discover(root: string): ScanTarget[] {
-  const targets: ScanTarget[] = [];
-  const rootStat = safeStat(root);
-  if (!rootStat) return targets;
+interface Candidate {
+  absPath: string;
+  relPath: string;
+  kind: FileKind;
+  size: number;
+}
 
+export interface DiscoverOptions {
+  /** Scan every candidate file, not just those in an agent-extension context. */
+  all?: boolean;
+}
+
+const norm = (p: string): string => p.replace(/\\/g, '/');
+
+export function discover(root: string, options: DiscoverOptions = {}): ScanTarget[] {
+  const rootStat = safeStat(root);
+  if (!rootStat) return [];
+
+  // A single explicit file target is always scanned.
   if (rootStat.isFile()) {
-    const t = toTarget(root, root);
-    if (t) targets.push(t);
-    return targets;
+    const t = toTarget(root, root, rootStat.size);
+    return t ? [t] : [];
   }
+
+  const candidates: Candidate[] = [];
+  const skillDirs = new Set<string>(); // normalized dirs that directly contain a SKILL.md
 
   const walk = (dir: string): void => {
     let entries: string[];
@@ -96,34 +121,78 @@ export function discover(root: string): ScanTarget[] {
         if (IGNORED_DIRS.has(entry)) continue;
         walk(full);
       } else if (st.isFile()) {
-        const t = toTarget(full, root, st.size);
-        if (t) targets.push(t);
+        if (entry.toLowerCase() === 'skill.md') skillDirs.add(norm(dir));
+        if (st.size > MAX_FILE_BYTES) continue;
+        const rel = relative(root, full);
+        const kind = classify(rel);
+        if (kind === null) continue;
+        candidates.push({ absPath: full, relPath: norm(rel), kind, size: st.size });
       }
     }
   };
   walk(root);
+
+  const all = options.all === true;
+  const targets: ScanTarget[] = [];
+  for (const c of candidates) {
+    if (all || inScope(c, skillDirs)) {
+      const t = readTarget(c);
+      if (t) targets.push(t);
+    }
+  }
   return targets;
+}
+
+/**
+ * A candidate is "in scope" for the default scan when it is itself an agent
+ * extension, or it lives inside an agent-extension context (a skills/.claude/
+ * .cursor tree, or a directory that ships a SKILL.md). Arbitrary source files
+ * elsewhere on disk are ignored unless --all is passed.
+ */
+function inScope(c: Candidate, skillDirs: Set<string>): boolean {
+  if (AGENT_EXTENSION_KINDS.includes(c.kind)) return true;
+  if (/(^|\/)(skills|\.claude|\.cursor)\//.test(c.relPath.toLowerCase())) return true;
+  const dir = norm(dirname(c.absPath));
+  for (const sd of skillDirs) {
+    if (dir === sd || dir.startsWith(sd + '/')) return true;
+  }
+  return false;
+}
+
+function readTarget(c: Candidate): ScanTarget | null {
+  let content: string;
+  try {
+    content = readFileSync(c.absPath, 'utf8');
+  } catch {
+    return null;
+  }
+  if (content.indexOf(NULL_BYTE) !== -1) return null; // skip binary files
+  return {
+    absPath: c.absPath,
+    relPath: c.relPath,
+    kind: c.kind,
+    content,
+    lines: content.split('\n'),
+    sizeBytes: c.size,
+  };
 }
 
 function toTarget(absPath: string, root: string, knownSize?: number): ScanTarget | null {
   const relPath = root === absPath ? basename(absPath) : relative(root, absPath);
   const kind = classify(relPath);
   if (kind === null) return null;
-
   const size = knownSize ?? safeStat(absPath)?.size ?? 0;
   if (size > MAX_FILE_BYTES) return null;
-
   let content: string;
   try {
     content = readFileSync(absPath, 'utf8');
   } catch {
     return null;
   }
-  if (content.indexOf(NULL_BYTE) !== -1) return null; // skip binary files
-
+  if (content.indexOf(NULL_BYTE) !== -1) return null;
   return {
     absPath,
-    relPath: relPath.replace(/\\/g, '/'),
+    relPath: norm(relPath),
     kind,
     content,
     lines: content.split('\n'),
@@ -141,12 +210,13 @@ function safeStat(p: string): Stats | null {
 
 export interface ScanOptions {
   now?: () => number;
+  all?: boolean;
 }
 
 export function scan(root: string, options: ScanOptions = {}): ScanSummary {
   const now = options.now ?? Date.now;
   const start = now();
-  const targets = discover(root);
+  const targets = discover(root, { all: options.all });
   const findings: Finding[] = [];
 
   for (const target of targets) {

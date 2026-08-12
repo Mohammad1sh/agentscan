@@ -6,7 +6,7 @@ import { renderHuman, renderJson } from './report.js';
 import type { Severity } from './types.js';
 import { SEVERITY_ORDER, severityAtLeast } from './types.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 interface Cli {
   path: string;
@@ -14,6 +14,7 @@ interface Cli {
   color: boolean;
   minSeverity: Severity;
   failOn: Severity | 'none';
+  all: boolean;
   help: boolean;
   version: boolean;
 }
@@ -28,7 +29,13 @@ USAGE
 ARGUMENTS
   path                    File or directory to scan (default: current directory)
 
+By default agentscan only scans agent extensions and the files that ship with
+them: SKILL.md and its skill directory, MCP configs (.mcp.json), Cursor rules,
+CLAUDE.md / AGENTS.md, and scripts inside a skills/.claude/.cursor tree. Ordinary
+source files elsewhere are left alone. Use --all to scan every file.
+
 OPTIONS
+  --all                   Scan every text file, not just agent extensions
   --json                  Output findings as JSON (for CI / tooling)
   --fail-on <severity>    Exit non-zero when a finding is at or above this
                           severity. One of: critical, high, medium, low, none
@@ -45,9 +52,9 @@ EXIT CODES
   2   usage error
 
 EXAMPLES
-  npx agentscan .
-  npx agentscan ./skills --fail-on critical
-  npx agentscan path/to/SKILL.md --json`;
+  npx @meedo01/agentscan .
+  npx @meedo01/agentscan ./skills --fail-on critical
+  npx @meedo01/agentscan path/to/SKILL.md --json`;
 
 function isSeverity(v: string): v is Severity {
   return (SEVERITY_ORDER as readonly string[]).includes(v);
@@ -60,6 +67,7 @@ function parseArgs(argv: string[]): Cli | { error: string } {
     color: Boolean(process.stdout.isTTY) && !process.env['NO_COLOR'],
     minSeverity: 'info',
     failOn: 'high',
+    all: false,
     help: false,
     version: false,
   };
@@ -78,6 +86,9 @@ function parseArgs(argv: string[]): Cli | { error: string } {
         break;
       case '--json':
         cli.json = true;
+        break;
+      case '--all':
+        cli.all = true;
         break;
       case '--no-color':
         cli.color = false;
@@ -130,7 +141,7 @@ function main(): void {
     process.exit(0);
   }
 
-  const summary = scan(parsed.path);
+  const summary = scan(parsed.path, { all: parsed.all });
 
   if (parsed.json) {
     process.stdout.write(renderJson(summary, VERSION) + '\n');
