@@ -1,0 +1,57 @@
+{
+  "name": "agentscan",
+  "version": "0.1.0",
+  "description": "Security & quality scanner for AI agent extensions — Claude skills, MCP servers, Cursor rules and agent instruction files. Like npm audit, but for the stuff you install into your coding agent.",
+  "type": "module",
+  "bin": {
+    "agentscan": "dist/cli.js"
+  },
+  "main": "dist/engine.js",
+  "types": "dist/engine.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test",
+    "scan": "node dist/cli.js",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "security",
+    "scanner",
+    "claude",
+    "claude-code",
+    "mcp",
+    "model-context-protocol",
+    "cursor",
+    "skills",
+    "prompt-injection",
+    "audit",
+    "linter",
+    "supply-chain",
+    "static-analysis"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OWNER/agentscan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OWNER/agentscan/issues"
+  },
+  "homepage": "https://github.com/OWNER/agentscan#readme",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^5.7.2"
+  }
+}
