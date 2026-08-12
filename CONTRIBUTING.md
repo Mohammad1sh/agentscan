@@ -6,7 +6,7 @@ are especially welcome — the value of agentscan is its rule set.
 ## Development setup
 
 ```bash
-git clone https://github.com/OWNER/agentscan.git
+git clone https://github.com/Mohammad1sh/agentscan.git
 cd agentscan
 npm install
 npm run build

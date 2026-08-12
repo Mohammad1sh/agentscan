@@ -44,12 +44,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/OWNER/agentscan.git"
+    "url": "https://github.com/Mohammad1sh/agentscan.git"
   },
   "bugs": {
-    "url": "https://github.com/OWNER/agentscan/issues"
+    "url": "https://github.com/Mohammad1sh/agentscan/issues"
   },
-  "homepage": "https://github.com/OWNER/agentscan#readme",
+  "homepage": "https://github.com/Mohammad1sh/agentscan#readme",
   "devDependencies": {
     "@types/node": "^26.2.0",
     "typescript": "^5.7.2"
