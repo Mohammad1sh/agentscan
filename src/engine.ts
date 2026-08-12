@@ -68,7 +68,10 @@ export function classify(relPath: string): FileKind | null {
   const normalized = relPath.replace(/\\/g, '/').toLowerCase();
 
   if (name === 'skill.md') return 'skill';
-  if (normalized.includes('/skills/') && ext === '.md') return 'skill';
+  // Only the SKILL.md manifest is a "skill". Other .md files under a skills/
+  // tree (README, CHANGELOG, references, translations, bundled web content) are
+  // documentation — classified as 'markdown' so danger rules there inform
+  // rather than fail an otherwise-legitimate plugin.
   if (MCP_CONFIG_FILES.has(name)) return 'mcp-config';
   if (AGENT_RULE_FILES.has(name)) return 'agent-rules';
   if (normalized.includes('/.cursor/rules/') && (ext === '.mdc' || ext === '.md')) return 'agent-rules';

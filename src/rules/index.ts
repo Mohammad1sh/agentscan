@@ -3,6 +3,7 @@
 // agentscan-ignore-file — a rules file necessarily contains the signatures it detects.
 
 import type { Rule, Finding, ScanTarget, FileKind, Severity } from '../types.js';
+import { SEVERITY_ORDER } from '../types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,6 +48,36 @@ function applies(target: ScanTarget, appliesTo: FileKind[] | 'all'): boolean {
   return appliesTo === 'all' || appliesTo.includes(target.kind);
 }
 
+// Documentation (README/CHANGELOG/reference .md, translations, bundled web
+// content) is not executed by the agent — a dangerous command shown there is an
+// example, not an instruction. For these categories, findings in a 'markdown'
+// doc are demoted to 'info' so they inform without failing an otherwise
+// legitimate plugin. SKILL.md, scripts, and configs keep full severity.
+const PROSE_DEMOTED_CATEGORIES = new Set([
+  'dangerous-command',
+  'obfuscation',
+  'supply-chain',
+  'data-exfiltration',
+  'permissions',
+]);
+
+/** Return the less-severe of two severities (SEVERITY_ORDER is critical→info). */
+function minSeverity(a: Severity, b: Severity): Severity {
+  return SEVERITY_ORDER.indexOf(a) >= SEVERITY_ORDER.indexOf(b) ? a : b;
+}
+
+function severityForProse(
+  base: Severity,
+  category: string,
+  kind: FileKind,
+  proseMax?: Severity,
+): Severity {
+  if (kind !== 'markdown') return base;
+  if (proseMax) return minSeverity(base, proseMax);
+  if (PROSE_DEMOTED_CATEGORIES.has(category)) return 'info';
+  return base;
+}
+
 function basename(relPath: string): string {
   const parts = relPath.split(/[\\/]/);
   return parts[parts.length - 1] ?? relPath;
@@ -69,6 +100,8 @@ interface PatternRuleDef {
   ignoreIf?: RegExp;
   /** Redact the matched text in the excerpt (secrets). */
   redact?: boolean;
+  /** When the match is in a prose/markdown doc, cap severity here (not below). */
+  proseMaxSeverity?: Severity;
 }
 
 function patternRule(def: PatternRuleDef): Rule {
@@ -88,7 +121,7 @@ function patternRule(def: PatternRuleDef): Rule {
         findings.push({
           ruleId: def.id,
           title: def.title,
-          severity: def.severity,
+          severity: severityForProse(def.severity, def.category, target.kind, def.proseMaxSeverity),
           category: def.category,
           file: target.relPath,
           line: m.line,
@@ -135,6 +168,7 @@ const PATTERN_RULES: PatternRuleDef[] = [
       'Content claims elevated authority (system/developer/admin) to pressure the agent into compliance.',
     recommendation:
       'Skills should not impersonate the system or platform. Rewrite as a plain task description.',
+    proseMaxSeverity: 'low',
   },
   {
     id: 'PI003',
@@ -161,6 +195,7 @@ const PATTERN_RULES: PatternRuleDef[] = [
       'Uses coercive phrasing to force the agent to run a command or tool without judgement.',
     recommendation:
       'Describe when a step is appropriate rather than commanding unconditional execution.',
+    proseMaxSeverity: 'low',
   },
 
   // --- Dangerous commands -------------------------------------------------
@@ -387,6 +422,7 @@ const PATTERN_RULES: PatternRuleDef[] = [
       'Move the value to an environment variable or secret store. Keep only a placeholder in the skill.',
     ignoreIf: PLACEHOLDER,
     redact: true,
+    proseMaxSeverity: 'low',
   },
 
   // --- Supply chain -------------------------------------------------------
@@ -428,13 +464,22 @@ const PATTERN_RULES: PatternRuleDef[] = [
 // Custom rules — logic that a single regex cannot express.
 // ---------------------------------------------------------------------------
 
-const SUSPICIOUS_CODEPOINTS = (cp: number): boolean =>
-  (cp >= 0x200b && cp <= 0x200f) || // zero-width + directional marks
-  (cp >= 0x202a && cp <= 0x202e) || // bidi embedding/override
-  (cp >= 0x2060 && cp <= 0x2064) || // invisible operators / word joiner
-  (cp >= 0x2066 && cp <= 0x206f) || // bidi isolates
-  cp === 0xfeff || // zero-width no-break space / BOM (mid-file)
-  (cp >= 0xe0000 && cp <= 0xe007f); // unicode tag characters
+// Invisible/bidi Unicode that can smuggle instructions past a human reviewer.
+// Tuned to avoid false positives on legitimate content: emoji zero-width
+// joiners, right-to-left scripts (Arabic/Hebrew/…), and a leading BOM.
+const RTL_LETTER =
+  /[֐-׿؀-ۿ܀-ݏݐ-ݿࢠ-ࣿיִ-﷿ﹰ-﻿]/;
+const TAG_CHAR = (cp: number): boolean => cp >= 0xe0000 && cp <= 0xe007f;
+const BIDI_CONTROL = (cp: number): boolean =>
+  cp === 0x200e || cp === 0x200f || (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x206f);
+const ZERO_WIDTH = (cp: number): boolean =>
+  cp === 0x200b || (cp >= 0x2060 && cp <= 0x2064) || cp === 0xfeff;
+// 0x200c / 0x200d (ZWNJ / ZWJ) are intentionally excluded — they are used in
+// emoji sequences and in Persian, Indic, and other scripts.
+
+function isAsciiWord(ch: string | undefined): boolean {
+  return ch !== undefined && /[A-Za-z0-9]/.test(ch);
+}
 
 const hiddenUnicodeRule: Rule = {
   id: 'PI005',
@@ -446,12 +491,25 @@ const hiddenUnicodeRule: Rule = {
     const findings: Finding[] = [];
     for (let i = 0; i < target.lines.length; i++) {
       const line = target.lines[i] ?? '';
+      const lineIsRtl = RTL_LETTER.test(line);
       for (let j = 0; j < line.length; j++) {
         const cp = line.codePointAt(j);
         if (cp === undefined) continue;
-        // Allow a leading BOM only at the very first character of the file.
-        if (cp === 0xfeff && i === 0 && j === 0) continue;
-        if (SUSPICIOUS_CODEPOINTS(cp)) {
+        let flagged = false;
+        if (TAG_CHAR(cp)) {
+          flagged = true; // Unicode tag chars have no legitimate textual use.
+        } else if (BIDI_CONTROL(cp)) {
+          // Bidi controls are expected inside RTL text; only suspicious when the
+          // line is otherwise left-to-right / ASCII.
+          flagged = !lineIsRtl;
+        } else if (ZERO_WIDTH(cp)) {
+          if (cp === 0xfeff && i === 0 && j === 0) continue; // leading BOM is fine
+          // Only flag a zero-width char wedged between ASCII word characters —
+          // the invisible-splitter smuggling pattern. Decorative/spacing uses
+          // (e.g. inside emoji or non-ASCII text) are left alone.
+          flagged = isAsciiWord(line[j - 1]) && isAsciiWord(line[j + 1]);
+        }
+        if (flagged) {
           findings.push({
             ruleId: 'PI005',
             title: 'Hidden Unicode characters',
@@ -475,10 +533,15 @@ const hiddenUnicodeRule: Rule = {
   },
 };
 
+// A genuine exfiltration payload reads a *sensitive* secret and sends it over
+// the network *near* the read. Requiring a specific secret (not bare .env /
+// process.env, which every app touches) plus line proximity avoids flagging a
+// README that mentions `.env` in one place and `curl` far away in another.
 const SECRET_READ =
-  /(process\.env|os\.environ|getenv|\$\{?[A-Z0-9_]{2,}(_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD)|~\/\.ssh|~\/\.aws|\.env\b|id_rsa|id_ed25519|\.git-credentials|\.npmrc|find-generic-password|printenv)/;
+  /(id_rsa\b|id_ed25519\b|~?\/?\.ssh\/|\.aws\/credentials|\.config\/gcloud|\.git-credentials|\.netrc\b|\.npmrc\b|find-generic-password|\b[A-Z][A-Z0-9_]*(_KEY|_TOKEN|_SECRET|_PASSWORD|_PASSWD)\b|process\.env\.[A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD)|os\.environ(\.get\(|\[)['"][^'"]*(KEY|TOKEN|SECRET|PASSWORD))/;
 const NETWORK_SEND =
   /\b(curl|wget|fetch\s*\(|axios|requests\.(get|post|put)|urllib|http\.request|Invoke-WebRequest|Invoke-RestMethod|nc\s|ncat\s|\/dev\/tcp\/)/i;
+const EXFIL_WINDOW = 4; // secret read and network send must be within N lines
 
 const exfilComboRule: Rule = {
   id: 'EX001',
@@ -487,26 +550,39 @@ const exfilComboRule: Rule = {
   category: 'data-exfiltration',
   appliesTo: ['script', 'skill', 'markdown'],
   check(target: ScanTarget): Finding[] {
-    let secretLine = -1;
-    let netLine = -1;
+    const secretLines: number[] = [];
+    const netLines: number[] = [];
     for (let i = 0; i < target.lines.length; i++) {
       const line = target.lines[i] ?? '';
-      if (secretLine === -1 && SECRET_READ.test(line)) secretLine = i;
-      if (netLine === -1 && NETWORK_SEND.test(line)) netLine = i;
+      if (SECRET_READ.test(line)) secretLines.push(i);
+      if (NETWORK_SEND.test(line)) netLines.push(i);
     }
-    if (secretLine === -1 || netLine === -1) return [];
-    const at = netLine >= 0 ? netLine : secretLine;
+    if (!secretLines.length || !netLines.length) return [];
+    let secretLine = -1;
+    let netLine = -1;
+    for (const s of secretLines) {
+      for (const n of netLines) {
+        if (Math.abs(s - n) <= EXFIL_WINDOW) {
+          secretLine = s;
+          netLine = n;
+          break;
+        }
+      }
+      if (secretLine !== -1) break;
+    }
+    if (secretLine === -1) return []; // secret and network never close together
+    const severity: Severity = target.kind === 'markdown' ? 'info' : 'critical';
     return [
       {
         ruleId: 'EX001',
         title: 'Credential read combined with network send',
-        severity: 'critical',
+        severity,
         category: 'data-exfiltration',
         file: target.relPath,
-        line: at + 1,
+        line: netLine + 1,
         column: 1,
-        excerpt: excerpt(target.lines[at] ?? ''),
-        message: `This file both reads secrets (line ${secretLine + 1}) and sends data over the network (line ${netLine + 1}) — the shape of a data-exfiltration payload.`,
+        excerpt: excerpt(target.lines[netLine] ?? ''),
+        message: `This file reads a secret (line ${secretLine + 1}) and sends data over the network (line ${netLine + 1}) within ${EXFIL_WINDOW} lines — the shape of a data-exfiltration payload.`,
         recommendation:
           'Confirm the destination and payload. A skill that reads credentials and phones home should be treated as hostile until proven otherwise.',
       },
@@ -534,7 +610,7 @@ const PERMISSION_PATTERNS: PatternRuleDef[] = [
     category: 'permissions',
     appliesTo: 'all',
     pattern:
-      /(--dangerously-skip-permissions|bypassPermissions|"?autoApprove"?\s*[:=]\s*true|--yes-to-all|--no-confirm|"?yolo"?\s*[:=]\s*true)/i,
+      /(--dangerously-skip-permissions|"?permission[_-]?mode"?\s*[:=]\s*["']?bypasspermissions|"?(bypasspermissions|autoapprove|yolo)"?\s*[:=]\s*true)/i,
     message: 'Disables the human-in-the-loop confirmation step.',
     recommendation:
       'Never ship auto-approve/permission-bypass in a distributed skill. Let the user approve sensitive actions.',
