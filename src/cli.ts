@@ -6,7 +6,7 @@ import { renderHuman, renderJson } from './report.js';
 import type { Severity } from './types.js';
 import { SEVERITY_ORDER, severityAtLeast } from './types.js';
 
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 interface Cli {
   path: string;
@@ -15,6 +15,7 @@ interface Cli {
   minSeverity: Severity;
   failOn: Severity | 'none';
   all: boolean;
+  byPackage: boolean;
   help: boolean;
   version: boolean;
 }
@@ -36,6 +37,8 @@ source files elsewhere are left alone. Use --all to scan every file.
 
 OPTIONS
   --all                   Scan every text file, not just agent extensions
+  --by-package            Also grade each detected package (skill / plugin /
+                          marketplace) separately, worst-first
   --json                  Output findings as JSON (for CI / tooling)
   --fail-on <severity>    Exit non-zero when a finding is at or above this
                           severity. One of: critical, high, medium, low, none
@@ -54,6 +57,7 @@ EXIT CODES
 EXAMPLES
   npx @meedo01/agentscan .
   npx @meedo01/agentscan ./skills --fail-on critical
+  npx @meedo01/agentscan ~ --by-package
   npx @meedo01/agentscan path/to/SKILL.md --json`;
 
 function isSeverity(v: string): v is Severity {
@@ -68,6 +72,7 @@ function parseArgs(argv: string[]): Cli | { error: string } {
     minSeverity: 'info',
     failOn: 'high',
     all: false,
+    byPackage: false,
     help: false,
     version: false,
   };
@@ -89,6 +94,9 @@ function parseArgs(argv: string[]): Cli | { error: string } {
         break;
       case '--all':
         cli.all = true;
+        break;
+      case '--by-package':
+        cli.byPackage = true;
         break;
       case '--no-color':
         cli.color = false;
@@ -152,6 +160,7 @@ function main(): void {
         minSeverity: parsed.minSeverity,
         version: VERSION,
         failOn: parsed.failOn,
+        byPackage: parsed.byPackage,
       }) + '\n',
     );
   }

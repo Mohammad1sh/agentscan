@@ -13,7 +13,7 @@ Think of it as `npm audit`, but for the stuff you install *into your coding
 agent*.
 
 ```bash
-npx agentscan .
+npx @meedo01/agentscan .
 ```
 
 - 🔒 **Zero runtime dependencies.** A security tool shouldn't drag in 200
@@ -90,13 +90,13 @@ A clean skill:
 Run it without installing:
 
 ```bash
-npx agentscan .
+npx @meedo01/agentscan .
 ```
 
 Or install globally:
 
 ```bash
-npm install -g agentscan
+npm install -g @meedo01/agentscan
 agentscan ./path/to/skill
 ```
 
@@ -133,7 +133,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - run: npx agentscan . --fail-on high
+      - run: npx @meedo01/agentscan . --fail-on high
 ```
 
 ## Options
@@ -142,12 +142,17 @@ By default agentscan scans only agent extensions and the files a skill ships
 (SKILL.md and its directory, MCP configs, Cursor rules, CLAUDE.md / AGENTS.md,
 and scripts under a `skills` / `.claude` / `.cursor` tree) — point it at a whole
 project or your home directory and it will **not** flag your libraries. Pass
-`--all` to scan every file instead.
+`--all` to scan every file instead. Scanning a directory that holds many
+extensions? Add `--by-package` to grade each skill / plugin / marketplace
+separately (worst-first) instead of collapsing everything into one aggregate
+score — so one risky third-party skill doesn't tar the rest with an `F`.
 
 ```
 agentscan [path] [options]
 
   --all                   Scan every file, not just agent extensions
+  --by-package            Grade each detected package (skill / plugin /
+                          marketplace) separately, worst-first
   --json                  Machine-readable JSON output
   --fail-on <severity>    Exit non-zero at/above this level
                           (critical|high|medium|low|none, default: high)

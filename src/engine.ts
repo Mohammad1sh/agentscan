@@ -1,8 +1,8 @@
 // Discovery + scan orchestration + scoring.
 
 import { readFileSync, statSync, readdirSync, type Stats } from 'node:fs';
-import { join, relative, extname, basename, dirname } from 'node:path';
-import type { ScanTarget, Finding, ScanSummary, Severity, FileKind } from './types.js';
+import { join, relative, extname, basename, dirname, resolve } from 'node:path';
+import type { ScanTarget, Finding, ScanSummary, Severity, FileKind, PackageKind, PackageScore } from './types.js';
 import { SEVERITY_ORDER, SEVERITY_WEIGHT } from './types.js';
 import { ALL_RULES } from './rules/index.js';
 
@@ -254,6 +254,7 @@ export function scan(root: string, options: ScanOptions = {}): ScanSummary {
     score,
     grade: gradeFor(score),
     durationMs: Math.max(0, now() - start),
+    packages: computePackages(targets, findings, root),
   };
 }
 
@@ -284,6 +285,171 @@ export function gradeFor(score: number): string {
   if (score >= 70) return 'C';
   if (score >= 60) return 'D';
   return 'F';
+}
+
+// ---------------------------------------------------------------------------
+// Per-package grouping. Grade each detected package (a skill, a plugin, a
+// marketplace, an installed plugin) on its own, so one aggregate F over
+// thousands of third-party extensions is no longer the only signal. Pure
+// string work over the already-discovered targets and findings — no extra I/O.
+// ---------------------------------------------------------------------------
+
+function parentDir(rel: string): string {
+  const p = rel.replace(/\\/g, '/');
+  const i = p.lastIndexOf('/');
+  return i < 0 ? '' : p.slice(0, i);
+}
+
+/**
+ * Map a scan-root-relative file path to the root of the package that owns it.
+ * Deepest boundary wins, with a live SKILL.md dir taking priority (it is the
+ * unit a user vets), then a skills/<name> collection, then the enclosing
+ * plugin / marketplace / installed-plugin dir, then a coarse top-level bucket.
+ * `root === ''` means the scan root itself (loose files, single-file scans).
+ */
+export function packageRootOf(
+  fileRel: string,
+  skillRoots: ReadonlySet<string>,
+): { root: string; kind: PackageKind } {
+  const dir = fileRel.replace(/\\/g, '/').split('/').slice(0, -1);
+  const n = dir.length;
+  const lc = (str: string): string => str.toLowerCase();
+
+  // R0 — the scan root itself ships a SKILL.md: the whole tree is one package.
+  if (skillRoots.has('')) return { root: '', kind: 'skill' };
+
+  let k = 0;
+  let kind: PackageKind = 'root';
+  const bump = (depth: number, kd: PackageKind): void => {
+    if (depth > k && depth <= n) {
+      k = depth;
+      kind = kd;
+    }
+  };
+
+  // R1 — deepest live SKILL.md dir that is an ancestor-or-equal of the file.
+  for (let len = n; len >= 1; len--) {
+    if (skillRoots.has(dir.slice(0, len).join('/'))) {
+      k = len;
+      kind = 'skill';
+      break;
+    }
+  }
+  // R2 — deepest 'skills/<name>' collection.
+  for (let i = n - 1; i >= 0; i--) {
+    if (lc(dir[i] ?? '') === 'skills' && i + 1 <= n - 1) {
+      bump(i + 2, 'collection');
+      break;
+    }
+  }
+  // R3 — plugins/cache/<owner>/<repo>/<version>.
+  for (let i = 0; i + 1 <= n - 1; i++) {
+    if (lc(dir[i] ?? '') === 'plugins' && lc(dir[i + 1] ?? '') === 'cache') {
+      bump(Math.min(i + 5, n), 'plugin');
+      break;
+    }
+  }
+  // R4 — plugins/marketplaces/<market> (+ a nested plugins/<plugin> if present).
+  for (let i = 0; i + 1 <= n - 1; i++) {
+    if (lc(dir[i] ?? '') === 'plugins' && lc(dir[i + 1] ?? '') === 'marketplaces') {
+      bump(Math.min(i + 3, n), 'marketplace');
+      for (let j = i + 3; j + 1 <= n - 1; j++) {
+        if (lc(dir[j] ?? '') === 'plugins') {
+          bump(j + 2, 'plugin');
+          break;
+        }
+      }
+      break;
+    }
+  }
+  // R5 — installed-plugin dir (rpm/session layout): deepest plugin_<id> segment.
+  for (let i = n - 1; i >= 0; i--) {
+    if (/^plugin_/i.test(dir[i] ?? '')) {
+      bump(i + 1, 'installed-plugin');
+      break;
+    }
+  }
+  // R6 — coarse fallback: the top-level dir (root stays '' only for a loose
+  // file directly at the scan root, including a single-file scan).
+  if (k === 0 && n >= 1) {
+    k = 1;
+    kind = 'root';
+  }
+
+  return { root: dir.slice(0, k).join('/'), kind };
+}
+
+function labelFor(root: string, scanRootBase: string): string {
+  if (root === '') return scanRootBase;
+  const segs = root.split('/');
+  const last = segs[segs.length - 1] ?? root;
+  if (segs.length >= 2 && /^v?\d+([._]\d+)+/.test(last)) {
+    return `${segs[segs.length - 2] ?? ''}@${last}`;
+  }
+  return last;
+}
+
+function cmpPackages(a: PackageScore, b: PackageScore): number {
+  if (a.score !== b.score) return a.score - b.score; // worst (lowest) first
+  for (const sev of SEVERITY_ORDER) {
+    if (a.counts[sev] !== b.counts[sev]) return b.counts[sev] - a.counts[sev];
+  }
+  if (a.filesScanned !== b.filesScanned) return b.filesScanned - a.filesScanned;
+  return a.id.localeCompare(b.id);
+}
+
+export function computePackages(
+  targets: ScanTarget[],
+  findings: Finding[],
+  root: string,
+): PackageScore[] {
+  const skillRoots = new Set<string>(
+    targets.filter((t) => t.kind === 'skill').map((t) => parentDir(t.relPath)),
+  );
+  const scanRootBase = basename(resolve(root)) || 'root';
+
+  interface Acc {
+    id: string;
+    label: string;
+    root: string;
+    kind: PackageKind;
+    files: number;
+    findings: Finding[];
+  }
+  const map = new Map<string, Acc>();
+  const ensure = (rel: string): Acc => {
+    const { root: r, kind } = packageRootOf(rel, skillRoots);
+    const id = r === '' ? '.' : r;
+    let acc = map.get(id);
+    if (!acc) {
+      acc = { id, label: labelFor(r, scanRootBase), root: r, kind, files: 0, findings: [] };
+      map.set(id, acc);
+    }
+    return acc;
+  };
+
+  for (const t of targets) ensure(t.relPath).files++;
+  for (const f of findings) ensure(f.file).findings.push(f);
+
+  const pkgs: PackageScore[] = [];
+  for (const acc of map.values()) {
+    const counts = emptyCounts();
+    for (const f of acc.findings) counts[f.severity]++;
+    const score = computeScore(counts);
+    pkgs.push({
+      id: acc.id,
+      label: acc.label,
+      root: acc.root,
+      kind: acc.kind,
+      filesScanned: acc.files,
+      findings: acc.findings,
+      counts,
+      score,
+      grade: gradeFor(score),
+    });
+  }
+  pkgs.sort(cmpPackages);
+  return pkgs;
 }
 
 // ---------------------------------------------------------------------------

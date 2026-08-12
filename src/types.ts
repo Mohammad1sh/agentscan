@@ -70,6 +70,27 @@ export interface Rule {
   check(target: ScanTarget): Finding[];
 }
 
+export type PackageKind =
+  | 'skill'
+  | 'collection'
+  | 'plugin'
+  | 'marketplace'
+  | 'installed-plugin'
+  | 'root';
+
+/** One detected package (a skill, plugin, marketplace, …) graded on its own. */
+export interface PackageScore {
+  id: string; // stable unique key: the package root path, or '.' for the scan root
+  label: string; // short display name (may repeat across different roots)
+  root: string; // package-root dir relative to the scan root ('' = the scan root)
+  kind: PackageKind;
+  filesScanned: number;
+  findings: Finding[]; // this package's slice of ScanSummary.findings (same refs)
+  counts: Record<Severity, number>;
+  score: number; // 0-100
+  grade: string; // A+ .. F
+}
+
 export interface ScanSummary {
   root: string;
   filesScanned: number;
@@ -78,4 +99,6 @@ export interface ScanSummary {
   score: number; // 0-100
   grade: string; // A+ .. F
   durationMs: number;
+  /** Per-package breakdown; always present (possibly empty). */
+  packages: PackageScore[];
 }

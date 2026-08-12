@@ -1,6 +1,6 @@
 // Human-readable "security scorecard" and machine-readable JSON reporters.
 
-import type { Finding, ScanSummary, Severity } from './types.js';
+import type { Finding, ScanSummary, Severity, PackageScore } from './types.js';
 import { SEVERITY_ORDER, severityAtLeast } from './types.js';
 
 const ANSI = {
@@ -37,6 +37,7 @@ export interface ReportOptions {
   minSeverity: Severity;
   version: string;
   failOn: Severity | 'none';
+  byPackage: boolean;
 }
 
 export function renderHuman(summary: ScanSummary, opts: ReportOptions): string {
@@ -55,6 +56,7 @@ export function renderHuman(summary: ScanSummary, opts: ReportOptions): string {
   if (summary.findings.length === 0) {
     out.push(s(ANSI.green, '  ✓ No issues found. Nothing suspicious in the scanned extensions.'));
     out.push('');
+    if (opts.byPackage) out.push(packagesSection(summary, s));
     out.push(scorecard(summary, opts, s));
     return out.join('\n');
   }
@@ -71,6 +73,7 @@ export function renderHuman(summary: ScanSummary, opts: ReportOptions): string {
     out.push('');
   }
 
+  if (opts.byPackage) out.push(packagesSection(summary, s));
   out.push(scorecard(summary, opts, s));
   return out.join('\n');
 }
@@ -125,6 +128,84 @@ function gradeColorOf(grade: string): string {
   return ANSI.red;
 }
 
+// ---------------------------------------------------------------------------
+// Per-package breakdown (shown with --by-package). Purely additive: without
+// the flag the output is byte-identical to before. Worst packages first; a
+// home-dir scan of thousands of clean third-party packages is capped here
+// (use --json for the complete list).
+// ---------------------------------------------------------------------------
+
+const PACKAGE_CAP = 12;
+
+function fit(str: string, w: number): string {
+  if (str.length === w) return str;
+  if (str.length > w) return w <= 1 ? str.slice(0, w) : str.slice(0, w - 1) + '…';
+  return str.padEnd(w);
+}
+
+function plainTallies(p: PackageScore): string {
+  const short: Record<Severity, string> = {
+    critical: 'crit',
+    high: 'high',
+    medium: 'med',
+    low: 'low',
+    info: 'info',
+  };
+  const parts: string[] = [];
+  for (const sev of SEVERITY_ORDER) {
+    if (sev === 'info') continue;
+    const n = p.counts[sev];
+    if (n > 0) parts.push(`${short[sev]} ${n}`);
+  }
+  return parts.length > 0 ? parts.join(' ') : '—';
+}
+
+function worstColor(p: PackageScore): string {
+  if (p.counts.critical > 0 || p.counts.high > 0) return ANSI.red;
+  if (p.counts.medium > 0) return ANSI.yellow;
+  if (p.counts.low > 0) return ANSI.cyan;
+  return ANSI.gray;
+}
+
+function packageRow(p: PackageScore, s: Style): string {
+  const grade = s(ANSI.bold, s(gradeColorOf(p.grade), fit(p.grade, 2)));
+  const score = s(ANSI.gray, `${String(p.score).padStart(3)}/100`);
+  const label = s(ANSI.bold, fit(p.label, 18));
+  const kind = s(ANSI.gray, fit(`(${p.kind})`, 16));
+  const tallies = s(worstColor(p), fit(plainTallies(p), 20));
+  const files = s(ANSI.gray, `${String(p.filesScanned).padStart(4)} file(s)`);
+  const id = s(ANSI.cyan, p.id);
+  return `${grade} ${score}  ${label} ${kind} ${tallies} ${files}  ${id}`;
+}
+
+function packagesSection(summary: ScanSummary, s: Style): string {
+  const line = '─'.repeat(52);
+  const pkgs = summary.packages;
+  const rows: string[] = [];
+  rows.push(s(ANSI.gray, line));
+  rows.push(
+    `  ${s(ANSI.bold, 'Packages')} ${s(ANSI.gray, '(worst first)')}   ` +
+      s(ANSI.gray, `${pkgs.length} total`),
+  );
+  rows.push(s(ANSI.gray, line));
+
+  if (pkgs.length === 0) {
+    rows.push(s(ANSI.gray, '  (no packages detected)'));
+    rows.push(s(ANSI.gray, line));
+    return rows.join('\n');
+  }
+
+  for (const p of pkgs.slice(0, PACKAGE_CAP)) {
+    rows.push('  ' + packageRow(p, s));
+  }
+  const hidden = pkgs.length - Math.min(pkgs.length, PACKAGE_CAP);
+  if (hidden > 0) {
+    rows.push(s(ANSI.gray, `  … ${hidden} more package(s) — use --json for the full list`));
+  }
+  rows.push(s(ANSI.gray, line));
+  return rows.join('\n');
+}
+
 export function renderJson(summary: ScanSummary, version: string): string {
   return JSON.stringify(
     {
@@ -136,6 +217,16 @@ export function renderJson(summary: ScanSummary, version: string): string {
       grade: summary.grade,
       counts: summary.counts,
       durationMs: summary.durationMs,
+      packages: summary.packages.map((p) => ({
+        id: p.id,
+        label: p.label,
+        root: p.root,
+        kind: p.kind,
+        filesScanned: p.filesScanned,
+        counts: p.counts,
+        score: p.score,
+        grade: p.grade,
+      })),
       findings: summary.findings,
     },
     null,
